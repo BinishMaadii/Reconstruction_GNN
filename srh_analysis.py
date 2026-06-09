@@ -25,6 +25,7 @@ EPOCHS = 5
 LEARNING_RATE = 0.001
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+
 # Set random seed for reproducibility
 random.seed(42)
 np.random.seed(42)
@@ -194,6 +195,8 @@ def evaluate_by_slide(model, test_paths, test_labels, test_slide_ids):
 # ----------------------------------------------------------------------
 # 6. MAIN PIPELINE
 # ----------------------------------------------------------------------
+## calls all the functions and the code
+
 def main():
     print(f"Using device: {DEVICE}")
 
