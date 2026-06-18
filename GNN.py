@@ -513,7 +513,7 @@ for epoch in range(EPOCHS):
 print("\nTraining done.")
 
 
-
+'''
 fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
 axes[0].plot(train_loss_history, label="train")
 axes[0].plot(val_loss_history, label="validation")
@@ -525,3 +525,84 @@ axes[2].set_title("Validation momentum MAE [MeV]")
 fig.tight_layout()
 plt.show(block = False)
 plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/validation_gnn.png")
+'''
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), dpi=120)
+
+# 1. Loss Subplot
+axes[0].plot(train_loss_history, label="Train", linewidth=1.8)
+axes[0].plot(val_loss_history, label="Validation", linewidth=1.8, linestyle="--")
+axes[0].set_title("Joint Loss (BCE + Gaussian NLL)", fontsize=11, fontweight="bold")
+axes[0].set_xlabel("Epoch", fontsize=10)
+axes[0].set_ylabel("Loss", fontsize=10)
+axes[0].grid(True, alpha=0.3)
+axes[0].legend(frameon=True)
+
+# 2. Accuracy Subplot
+axes[1].plot(val_accuracy_history, color="tab:green", linewidth=1.8)
+axes[1].set_title("Noise Rejection Accuracy", fontsize=11, fontweight="bold")
+axes[1].set_xlabel("Epoch", fontsize=10)
+axes[1].set_ylabel("Accuracy", fontsize=10)
+axes[1].set_ylim(0.5, 1.0)
+axes[1].grid(True, alpha=0.3)
+
+# 3. Momentum MAE Subplot
+axes[2].plot(val_mae_history, color="tab:red", linewidth=1.8)
+axes[2].set_title(r"Momentum MAE", fontsize=11, fontweight="bold")
+axes[2].set_xlabel("Epoch", fontsize=10)
+axes[2].set_ylabel("MAE [MeV]", fontsize=10)
+axes[2].grid(True, alpha=0.3)
+
+fig.tight_layout()
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/validation_gnn_refined.png")
+plt.pause(0.5)
+
+
+
+
+######3 Model evaluaation
+
+
+
+model.eval()
+with torch.no_grad():
+    val_node_logit, val_mom_mean, val_mom_log_var = model(
+        hit_features_tensor[validation_indices], hit_is_used_tensor[validation_indices],
+        tof_momentum_tensor[validation_indices])
+
+signal_probability_np = torch.sigmoid(val_node_logit).numpy()
+momentum_pred_mev = val_mom_mean.numpy() * MOMENTUM_SCALE_MEV
+momentum_pred_std_mev = np.sqrt(np.exp(val_mom_log_var.numpy())) * MOMENTUM_SCALE_MEV
+val_indices_np = validation_indices.numpy()
+
+print(f"Got predictions for {len(val_indices_np)} validation events.")
+
+
+
+used_mask = hit_is_used[val_indices_np]
+probs_flat = signal_probability_np[used_mask]
+labels_flat = hit_is_real[val_indices_np][used_mask]
+
+plt.figure(figsize=(5, 3.5))
+plt.hist(probs_flat[labels_flat == 1], bins=40, alpha=0.6, label="real hits")
+plt.hist(probs_flat[labels_flat == 0], bins=40, alpha=0.6, label="noise hits")
+plt.xlabel("predicted signal probability"); plt.ylabel("count")
+plt.title("Model performance to separate real hits from noise?")
+plt.legend()
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/hits_separation.png")
+
+
+
+plt.figure(figsize=(5, 3.5))
+plt.hist(momentum_pred_std_mev, bins=50)
+plt.xlabel("predicted momentum std [MeV]"); plt.ylabel("count")
+plt.title("Spread of predicted momentum uncalibrated uncertainty")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/uncalibrated_momentum_uncretainty.png")
+plt.pause(0.5)
+
+
+
+
