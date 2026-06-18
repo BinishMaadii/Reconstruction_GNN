@@ -1,6 +1,7 @@
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
@@ -434,10 +435,79 @@ def gaussian_negative_log_likelihood(predicted_mean, predicted_log_var, true_val
 print("Model classes defined.")
 
 
-
 # demo: an untrained forward pass, just to see the shapes flow through
 model = TrackGNN()
 sample_node_logit, sample_mean, sample_log_var = model(
     hit_features_tensor[:4], hit_is_used_tensor[:4], tof_momentum_tensor[:4])
 print("node_logit shape:", tuple(sample_node_logit.shape), "(one score per hit candidate)")
 print("momentum mean (untrained, meaningless yet):", sample_mean.detach().numpy())
+
+
+
+
+#### Training the model
+
+n_validation = int(N_EVENTS * 0.1)
+shuffled_indices = torch.randperm(N_EVENTS)
+validation_indices = shuffled_indices[:n_validation]
+training_indices = shuffled_indices[n_validation:]
+
+model = TrackGNN()
+optimizer = torch.optim.Adam(model.parameters(), lr=2e-3)
+
+train_loss_history = []
+val_loss_history = []
+val_accuracy_history = []
+val_mae_history = []
+
+EPOCHS = 60
+BATCH_SIZE = 256
+
+for epoch in range(EPOCHS):
+    model.train()
+    epoch_indices = training_indices[torch.randperm(len(training_indices))]
+    total_loss = 0.0
+
+    for batch_start in range(0, len(epoch_indices), BATCH_SIZE):
+        batch = epoch_indices[batch_start: batch_start + BATCH_SIZE]
+
+        node_logit, mom_mean, mom_log_var = model(
+            hit_features_tensor[batch], hit_is_used_tensor[batch], tof_momentum_tensor[batch])
+
+        used = hit_is_used_tensor[batch]
+        noise_loss = F.binary_cross_entropy_with_logits(node_logit[used], hit_is_real_tensor[batch][used])
+        mom_loss = gaussian_negative_log_likelihood(
+            mom_mean, mom_log_var, true_momentum_tensor[batch]).mean()
+        loss = noise_loss + mom_loss
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item() * len(batch)
+
+    train_loss_history.append(total_loss / len(training_indices))
+
+    model.eval()
+    with torch.no_grad():
+        node_logit, mom_mean, mom_log_var = model(
+            hit_features_tensor[validation_indices], hit_is_used_tensor[validation_indices],
+            tof_momentum_tensor[validation_indices])
+        used = hit_is_used_tensor[validation_indices]
+        labels = hit_is_real_tensor[validation_indices]
+        true_mom = true_momentum_tensor[validation_indices]
+
+        noise_loss = F.binary_cross_entropy_with_logits(node_logit[used], labels[used])
+        mom_loss = gaussian_negative_log_likelihood(mom_mean, mom_log_var, true_mom).mean()
+        val_loss_history.append((noise_loss + mom_loss).item())
+
+        predicted_labels = (torch.sigmoid(node_logit[used]) > 0.5).float()
+        val_accuracy_history.append((predicted_labels == labels[used]).float().mean().item())
+        val_mae_history.append((mom_mean - true_mom).abs().mean().item() * MOMENTUM_SCALE_MEV)
+
+    if epoch % 10 == 0 or epoch == EPOCHS - 1:
+        print(f"epoch {epoch:3d}  train_loss={train_loss_history[-1]:.4f}  "
+              f"val_loss={val_loss_history[-1]:.4f}  "
+              f"noise_accuracy={val_accuracy_history[-1]:.4f}  "
+              f"momentum_MAE={val_mae_history[-1]:.1f} MeV")
+
+print("\nTraining done.")
