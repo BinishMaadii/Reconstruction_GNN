@@ -511,3 +511,17 @@ for epoch in range(EPOCHS):
               f"momentum_MAE={val_mae_history[-1]:.1f} MeV")
 
 print("\nTraining done.")
+
+
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
+axes[0].plot(train_loss_history, label="train")
+axes[0].plot(val_loss_history, label="validation")
+axes[0].set_title("Loss"); axes[0].legend()
+axes[1].plot(val_accuracy_history)
+axes[1].set_title("Validation noise-rejection accuracy"); axes[1].set_ylim(0.5, 1)
+axes[2].plot(val_mae_history)
+axes[2].set_title("Validation momentum MAE [MeV]")
+fig.tight_layout()
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/validation_gnn.png")
