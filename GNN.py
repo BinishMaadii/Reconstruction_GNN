@@ -606,3 +606,121 @@ plt.pause(0.5)
 
 
 
+z_top = np.array(TOP_PLANES_Z)
+z_bottom = np.array(BOTTOM_PLANES_Z)
+
+n_val = len(val_indices_np)
+measured_theta_squared = np.zeros(n_val)
+every_plane_correct = np.zeros(n_val, dtype=bool)
+track_confidence = np.zeros(n_val)
+
+for i, event_index in enumerate(val_indices_np):
+    this_hit_xyz = hit_xyz[event_index]
+    this_hit_used = hit_is_used[event_index]
+    this_hit_real = hit_is_real[event_index]
+    this_probability = signal_probability_np[i]
+
+    # pick the most-confident hit on each of the 6 planes
+    chosen_xy = {}
+    all_correct = True
+    lowest_confidence = 1.0
+    for plane_z in ALL_PLANES_Z:
+        on_plane = this_hit_used & np.isclose(this_hit_xyz[:, 2], plane_z)
+        candidates = np.where(on_plane)[0]
+        best = candidates[np.argmax(this_probability[candidates])]
+        chosen_xy[plane_z] = this_hit_xyz[best, :2]
+        all_correct &= this_hit_real[best] > 0.5
+        lowest_confidence = min(lowest_confidence, this_probability[best])
+    every_plane_correct[i] = all_correct
+    track_confidence[i] = lowest_confidence
+
+    # fit a line through the 3 top points and the 3 bottom points
+    top_points = np.array([chosen_xy[z] for z in TOP_PLANES_Z])
+    bottom_points = np.array([chosen_xy[z] for z in BOTTOM_PLANES_Z])
+
+    A_top = np.stack([z_top, np.ones_like(z_top)], axis=1)
+    slope_x, _ = np.linalg.lstsq(A_top, top_points[:, 0], rcond=None)[0]
+    slope_y, _ = np.linalg.lstsq(A_top, top_points[:, 1], rcond=None)[0]
+    entry_dir_fit = np.array([-slope_x, -slope_y, -1.0])
+    entry_dir_fit /= np.linalg.norm(entry_dir_fit)
+
+    A_bot = np.stack([z_bottom, np.ones_like(z_bottom)], axis=1)
+    slope_x2, _ = np.linalg.lstsq(A_bot, bottom_points[:, 0], rcond=None)[0]
+    slope_y2, _ = np.linalg.lstsq(A_bot, bottom_points[:, 1], rcond=None)[0]
+    exit_dir_fit = np.array([-slope_x2, -slope_y2, -1.0])
+    exit_dir_fit /= np.linalg.norm(exit_dir_fit)
+
+    # measured scattering angle, in the frame local to the fitted entry direction
+    side_u, side_v = build_local_axes(entry_dir_fit[None, :])
+    cos_defl = np.clip(np.dot(exit_dir_fit, entry_dir_fit), -1, 1)
+    angle_u = np.arctan2(np.dot(exit_dir_fit, side_u[0]), cos_defl)
+    angle_v = np.arctan2(np.dot(exit_dir_fit, side_v[0]), cos_defl)
+    measured_theta_squared[i] = angle_u ** 2 + angle_v ** 2
+
+print(f"Noise-rejection accuracy on validation events: {(hit_is_real[val_indices_np][hit_is_used[val_indices_np]] == (signal_probability_np[hit_is_used[val_indices_np]] > 0.5)).mean():.4f}")
+print(f"Fraction of events where all 6 planes were picked correctly: {every_plane_correct.mean():.4f}")
+
+
+
+
+plt.figure(figsize=(5, 3.5))
+plt.hist(track_confidence[every_plane_correct], bins=30, alpha=0.6, label="all 6 planes correct")
+plt.hist(track_confidence[~every_plane_correct], bins=30, alpha=0.6, label="at least one wrong")
+plt.xlabel("track confidence (lowest of the 6 chosen hits)"); plt.ylabel("count")
+plt.title("Confidence vs. actual correctness")
+plt.legend()
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/confidence_vs_correctness.png")
+plt.pause(0.5)
+
+
+
+plt.figure(figsize=(5, 3.5))
+plt.hist(np.sqrt(measured_theta_squared) * 1000, bins=40)
+plt.xlabel("GNN-measured scattering angle [mrad]"); plt.ylabel("count")
+plt.title("Distribution of measured scattering angles")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/measured_scattering_angles.png")
+plt.pause(0.5)
+
+
+
+# true scattering angle for the same validation events, for comparison
+side_u_true, side_v_true = build_local_axes(entry_direction[val_indices_np])
+cos_defl_true = np.clip(np.sum(exit_direction[val_indices_np] * entry_direction[val_indices_np], axis=1), -1, 1)
+angle_u_true = np.arctan2(np.sum(exit_direction[val_indices_np] * side_u_true, axis=1), cos_defl_true)
+angle_v_true = np.arctan2(np.sum(exit_direction[val_indices_np] * side_v_true, axis=1), cos_defl_true)
+true_theta_squared_val = angle_u_true ** 2 + angle_v_true ** 2
+
+correlation_all = np.corrcoef(measured_theta_squared, true_theta_squared_val)[0, 1]
+print(f"Track-fit quality, ALL validation events (correlation with truth): {correlation_all:.4f}")
+
+print("\nThe model's own confidence predicts when to trust its track fit:")
+thresholds = np.array([0.5, 0.7, 0.9, 0.95, 0.99])
+kept_fraction, correlation_per_threshold = [], []
+for threshold in thresholds:
+    keep = track_confidence > threshold
+    kept_fraction.append(keep.mean())
+    correlation_per_threshold.append(
+        np.corrcoef(measured_theta_squared[keep], true_theta_squared_val[keep])[0, 1])
+    print(f"  confidence > {threshold:.2f}: keeps {keep.mean():6.1%}, correlation = {correlation_per_threshold[-1]:.4f}")
+
+plt.figure(figsize=(4.5, 4.5))
+sample = np.random.default_rng(0).choice(n_val, min(1500, n_val), replace=False)
+plt.scatter(true_theta_squared_val[sample], measured_theta_squared[sample], s=4, alpha=0.4)
+lim = np.percentile(true_theta_squared_val, 99.5)
+plt.plot([0, lim], [0, lim], "r--")
+plt.xlim(0, lim); plt.ylim(0, lim)
+plt.xlabel("true theta^2"); plt.ylabel("GNN-measured theta^2")
+plt.title(f"Track finding via GNN (corr={correlation_all:.3f})")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/track_finding_theta_result.png")
+plt.pause(0.5)
+
+
+
+
+
+
+
+
