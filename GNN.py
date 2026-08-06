@@ -261,3 +261,82 @@ plt.title("True scattering angle"); plt.xlabel("mrad")
 plt.show(block = False)
 plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/scaterring_angle_true.png")
 plt.pause(0.5)
+
+
+
+
+# --- apply the scattering kick, in the frame local to each muon ---
+kick_u = RNG.normal(0, true_theta0)
+kick_v = RNG.normal(0, true_theta0)
+side_u, side_v = build_local_axes(entry_direction)
+exit_direction = entry_direction + kick_u[:, None] * side_u + kick_v[:, None] * side_v
+exit_direction = exit_direction / np.linalg.norm(exit_direction, axis=1, keepdims=True)
+
+angle_between = np.degrees(np.arccos(np.clip(
+    np.sum(entry_direction * exit_direction, axis=1), -1, 1)))
+print(f"Entry-to-exit deflection: mean {angle_between.mean():.3f} deg, "
+      f"max {angle_between.max():.2f} deg (tiny compared to the 20-deg beam divergence)")
+
+
+
+
+# --- project entry/exit tracks onto the 6 detector planes, add smearing ---
+distance_to_exit = (z_centers[-1] - TOP_PLANES_Z[0]) / entry_direction[:, 2]
+exit_xy = entry_xy + distance_to_exit[:, None] * entry_direction[:, :2]
+exit_z = z_centers[-1]
+
+true_hit_xy = {}
+for plane_z in TOP_PLANES_Z:
+    distance = (plane_z - TOP_PLANES_Z[0]) / entry_direction[:, 2]
+    xy = entry_xy + distance[:, None] * entry_direction[:, :2]
+    true_hit_xy[plane_z] = xy + RNG.normal(0, DETECTOR_RESOLUTION_CM, xy.shape)
+for plane_z in BOTTOM_PLANES_Z:
+    distance = (plane_z - exit_z) / exit_direction[:, 2]
+    xy = exit_xy + distance[:, None] * exit_direction[:, :2]
+    true_hit_xy[plane_z] = xy + RNG.normal(0, DETECTOR_RESOLUTION_CM, xy.shape)
+
+print("Computed the true hit position on each of the 6 planes for all events.")
+print("Example, event 0:")
+for plane_z in ALL_PLANES_Z:
+    print(f"  z={plane_z:6.1f} cm -> hit at {np.round(true_hit_xy[plane_z][0], 3)}")
+
+
+
+# --- build the padded hit arrays: 1 real hit + sometimes 1 background
+# hit per plane, shuffled so the real hit isn't always first ---
+hit_xyz = np.zeros((N_EVENTS, MAX_HITS_PER_EVENT, 3))
+hit_is_top_plane = np.zeros((N_EVENTS, MAX_HITS_PER_EVENT))
+hit_is_real = np.zeros((N_EVENTS, MAX_HITS_PER_EVENT))
+hit_is_used = np.zeros((N_EVENTS, MAX_HITS_PER_EVENT), dtype=bool)
+
+for event_i in range(N_EVENTS):
+    next_free_slot = 0
+    for plane_z in ALL_PLANES_Z:
+        is_top = 1.0 if plane_z in TOP_PLANES_Z else 0.0
+
+        candidates_xy = [true_hit_xy[plane_z][event_i]]
+        candidates_is_real = [1]
+        if RNG.uniform() < BACKGROUND_HIT_PROBABILITY:
+            noise_xy = true_hit_xy[plane_z][event_i] + RNG.normal(0, BACKGROUND_HIT_SPREAD_CM, 2)
+            candidates_xy.append(noise_xy)
+            candidates_is_real.append(0)
+
+        for candidate_index in RNG.permutation(len(candidates_xy)):
+            slot = next_free_slot
+            hit_xyz[event_i, slot] = [candidates_xy[candidate_index][0],
+                                       candidates_xy[candidate_index][1], plane_z]
+            hit_is_top_plane[event_i, slot] = is_top
+            hit_is_real[event_i, slot] = candidates_is_real[candidate_index]
+            hit_is_used[event_i, slot] = True
+            next_free_slot += 1
+
+hits_per_event = hit_is_used.sum(axis=1)
+print(f"Hits per event: min {hits_per_event.min():.0f}, max {hits_per_event.max():.0f}, "
+      f"mean {hits_per_event.mean():.2f} (6 planes, some with an extra background hit)")
+
+plt.figure(figsize=(4, 3))
+plt.hist(hits_per_event, bins=np.arange(5.5, 13))
+plt.title("Hit candidates per event"); plt.xlabel("count")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/hits_candidate_per_event.png")
+plt.pause(0.5)
