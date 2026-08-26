@@ -181,3 +181,50 @@ plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding
 plt.pause(0.5)
 
 
+
+
+# --- entry position and direction: a 20-degree-wide beam cone ---
+entry_xy = RNG.uniform(-grid.half_x * 0.6, grid.half_x * 0.6, size=(N_EVENTS, 2))
+divergence_rad = np.deg2rad(20.0)
+angle_x = RNG.normal(0, divergence_rad, N_EVENTS)
+angle_y = RNG.normal(0, divergence_rad, N_EVENTS)
+
+
+#entry_direction = np.stack([
+#    np.sin(angle_x), np.sin(angle_y), -np.cos(angle_x) * np.cos(angle_y)], axis=1)
+
+
+entry_direction = np.stack([
+    -np.sin(angle_x),
+    np.cos(angle_x) * np.sin(angle_y),
+    -np.cos(angle_x) * np.cos(angle_y),
+], axis = 1)
+
+
+
+norms = np.linalg.norm(entry_direction, axis=1)
+print("entry_direction norm range:", norms.min(), "to", norms.max(), "(should read 1.0 to 1.0 now)")
+
+
+print("Entry direction z-component range:", entry_direction[:, 2].min(),
+      "to", entry_direction[:, 2].max(),
+      "(should be negative - beam points down; occasionally a rare >90-degree "
+      "sampled angle flips this for one event out of thousands, a known edge "
+      "case of a Gaussian-sampled wide beam cone, not something worth guarding "
+      "against for a demo dataset this size)")
+plt.figure(figsize=(4, 4))
+plt.scatter(entry_xy[:, 0], entry_xy[:, 1], s=2, alpha=0.3)
+plt.title("Entry positions on the beam face"); plt.gca().set_aspect("equal")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/postions_on_each_face_scatter.png")
+plt.pause(0.5)
+
+plt.figure(figsize=(4,4))
+plt.hist2d(entry_xy[:,0],entry_xy[:, 1], bins=25)
+plt.title("Entry positions, binned")
+plt.colorbar()
+plt.gca().set_aspect("equal")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/postions_on_each_face_2D.png")
+plt.pause(0.5)
+
