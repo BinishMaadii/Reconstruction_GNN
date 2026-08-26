@@ -228,3 +228,36 @@ plt.show(block = False)
 plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/postions_on_each_face_2D.png")
 plt.pause(0.5)
 
+
+
+# --- true scattering angle: sum the Highland contribution from every
+# z-layer each straight-line path crosses, using the REAL density field ---
+z_centers = grid.layer_z_centers()
+total_theta0_squared = np.zeros(N_EVENTS)
+
+for z in z_centers:
+    distance_along_ray = (z - TOP_PLANES_Z[0]) / entry_direction[:, 2]
+    x = entry_xy[:, 0] + distance_along_ray * entry_direction[:, 0]
+    y = entry_xy[:, 1] + distance_along_ray * entry_direction[:, 1]
+
+    voxel_x = np.floor((x + grid.half_x) / grid.voxel_cm).astype(int)
+    voxel_y = np.floor((y + grid.half_y) / grid.voxel_cm).astype(int)
+    inside_grid = (voxel_x >= 0) & (voxel_x < grid.nx) & (voxel_y >= 0) & (voxel_y < grid.ny)
+
+    layer_index = int(np.argmin(np.abs(z_centers - z)))
+    density_here = np.zeros(N_EVENTS)
+    density_here[inside_grid] = true_density[layer_index, voxel_y[inside_grid], voxel_x[inside_grid]]
+
+    radiation_length = density_to_radiation_length(np.clip(density_here, 0, None))
+    theta0_this_layer = highland_theta0(momentum_mev, grid.voxel_cm, radiation_length)
+    total_theta0_squared += np.where(inside_grid, theta0_this_layer ** 2, 0.0)
+
+true_theta0 = np.sqrt(total_theta0_squared)
+print(f"True scattering angle: mean {true_theta0.mean()*100000:.2f} mrad, "
+      f"max {true_theta0.max()*100000:.1f} mrad")
+plt.figure(figsize=(4, 3))
+plt.hist(true_theta0 * 100000, bins=40)
+plt.title("True scattering angle"); plt.xlabel("mrad")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/scaterring_angle_true.png")
+plt.pause(0.5)
