@@ -137,3 +137,47 @@ plt.title(r"Scattering angle ($\theta$) vs momentum"); plt.legend()
 plt.show(block = False)
 plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/highland_theta_dependence_momentum.png")
 plt.pause(0.5)
+
+
+##### Generate a batch of new muon events
+
+### detector plan choices
+
+TOP_PLANES_Z = (45.0, 35.0, 25.0)
+BOTTOM_PLANES_Z = (-25.0, -35.0, -45.0)
+ALL_PLANES_Z = TOP_PLANES_Z + BOTTOM_PLANES_Z
+
+
+### Noise model
+
+DETECTOR_RESOLUTION_CM = 0.05
+BACKGROUND_HIT_PROBABILITY = 0.35
+BACKGROUND_HIT_SPREAD_CM = 12.0
+
+#### TOF beta resolution
+
+TOF_BETA_RESOLUTION = 1e-4
+
+
+###3 Hits range
+
+MAX_HITS_PER_EVENT = 2 * len(ALL_PLANES_Z)
+
+N_EVENTS = 10000
+
+
+# --- momentum for every event, plus a noisy time-of-flight-based guess ---
+momentum_mev = RNG.uniform(300, 5000, size=N_EVENTS)
+true_beta = muon_beta(momentum_mev)
+tof_beta_measurement = np.clip(true_beta + RNG.normal(0, TOF_BETA_RESOLUTION, N_EVENTS),
+                                1e-3, 1 - 1e-7)
+
+print(f"{N_EVENTS} events, momentum {momentum_mev.min():.0f}-{momentum_mev.max():.0f} MeV")
+plt.figure(figsize=(4, 3))
+plt.hist(momentum_mev, bins=40)
+plt.title("Momentum spectrum"); plt.xlabel("MeV")
+plt.show(block=False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/hits_range.png")
+plt.pause(0.5)
+
+
