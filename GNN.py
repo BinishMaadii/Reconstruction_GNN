@@ -340,3 +340,104 @@ plt.title("Hit candidates per event"); plt.xlabel("count")
 plt.show(block = False)
 plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/hits_candidate_per_event.png")
 plt.pause(0.5)
+
+
+
+xyz_normalized = hit_xyz.copy()
+xyz_normalized[..., 0] /= 20.0   # x in units of the grid half-width
+xyz_normalized[..., 1] /= 20.0
+xyz_normalized[..., 2] /= 45.0   # z in units of the farthest plane distance
+
+MOMENTUM_SCALE_MEV = 1000.0
+tof_momentum_guess = momentum_from_beta(tof_beta_measurement) / MOMENTUM_SCALE_MEV
+true_momentum_scaled = momentum_mev / MOMENTUM_SCALE_MEV
+
+hit_features_tensor = torch.tensor(
+    np.concatenate([xyz_normalized, hit_is_top_plane[..., None]], axis=-1), dtype=torch.float32)
+hit_is_used_tensor = torch.tensor(hit_is_used, dtype=torch.bool)
+hit_is_real_tensor = torch.tensor(hit_is_real, dtype=torch.float32)
+tof_momentum_tensor = torch.tensor(tof_momentum_guess, dtype=torch.float32).unsqueeze(-1)
+true_momentum_tensor = torch.tensor(true_momentum_scaled, dtype=torch.float32)
+
+print("hit_features_tensor shape:", tuple(hit_features_tensor.shape),
+      "= (events, max_hits, [x, y, z, is_top_plane])")
+print("hit_is_used_tensor shape: ", tuple(hit_is_used_tensor.shape))
+
+
+
+###### Graph neural Network Definition
+
+class GraphAttentionBlock(nn.Module):
+    """Every hit in an event attends to every other hit in that same
+    event. Plain matmul + transpose, no einsum."""
+
+    def __init__(self, feature_dim, hidden_dim=64):
+        super().__init__()
+        self.to_query = nn.Linear(feature_dim, feature_dim)
+        self.to_key = nn.Linear(feature_dim, feature_dim)
+        self.to_value = nn.Linear(feature_dim, feature_dim)
+        self.combine = nn.Sequential(
+            nn.Linear(2 * feature_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, feature_dim))
+        self.norm_after_attention = nn.LayerNorm(feature_dim)
+        self.norm_after_combine = nn.LayerNorm(feature_dim)
+
+    def forward(self, node_features, node_is_real):
+        query = self.to_query(node_features)
+        key = self.to_key(node_features)
+        value = self.to_value(node_features)
+
+        attention_scores = (query @ key.transpose(1, 2)) / (query.shape[-1] ** 0.5)
+        both_real = node_is_real.unsqueeze(2) & node_is_real.unsqueeze(1)
+        attention_scores = attention_scores.masked_fill(~both_real, -1e9)
+        attention_weights = torch.softmax(attention_scores, dim=-1) * both_real
+
+        messages = attention_weights @ value
+        node_features = self.norm_after_attention(node_features + messages)
+        combined = torch.cat([node_features, messages], dim=-1)
+        node_features = self.norm_after_combine(node_features + self.combine(combined))
+        return node_features
+
+
+class TrackGNN(nn.Module):
+    """Embed hits -> 2 attention blocks -> noise-rejection head +
+    momentum (mean, log-variance) head."""
+
+    def __init__(self, input_dim=4, feature_dim=48):
+        super().__init__()
+        self.embed_hit = nn.Sequential(
+            nn.Linear(input_dim, feature_dim), nn.ReLU(), nn.Linear(feature_dim, feature_dim))
+        self.attention_block_1 = GraphAttentionBlock(feature_dim)
+        self.attention_block_2 = GraphAttentionBlock(feature_dim)
+        self.node_head = nn.Linear(feature_dim, 1)
+        self.momentum_head = nn.Sequential(
+            nn.Linear(feature_dim + 1, 32), nn.ReLU(), nn.Linear(32, 2))
+
+    def forward(self, hit_features, hit_is_used, tof_momentum_guess):
+        node_features = self.embed_hit(hit_features)
+        node_features = self.attention_block_1(node_features, hit_is_used)
+        node_features = self.attention_block_2(node_features, hit_is_used)
+
+        node_logit = self.node_head(node_features).squeeze(-1).masked_fill(~hit_is_used, -1e9)
+
+        signal_probability = torch.sigmoid(node_logit) * hit_is_used
+        pooling_weight = signal_probability / (signal_probability.sum(dim=1, keepdim=True) + 1e-6)
+        pooled_features = (pooling_weight.unsqueeze(-1) * node_features).sum(dim=1)
+
+        mean_and_log_var = self.momentum_head(torch.cat([pooled_features, tof_momentum_guess], dim=-1))
+        return node_logit, mean_and_log_var[:, 0], mean_and_log_var[:, 1]
+
+
+def gaussian_negative_log_likelihood(predicted_mean, predicted_log_var, true_value):
+    predicted_log_var = torch.clamp(predicted_log_var, -4, 12)
+    return 0.5 * (predicted_log_var + (true_value - predicted_mean) ** 2 / torch.exp(predicted_log_var))
+
+print("Model classes defined.")
+
+
+
+# demo: an untrained forward pass, just to see the shapes flow through
+model = TrackGNN()
+sample_node_logit, sample_mean, sample_log_var = model(
+    hit_features_tensor[:4], hit_is_used_tensor[:4], tof_momentum_tensor[:4])
+print("node_logit shape:", tuple(sample_node_logit.shape), "(one score per hit candidate)")
+print("momentum mean (untrained, meaningless yet):", sample_mean.detach().numpy())
