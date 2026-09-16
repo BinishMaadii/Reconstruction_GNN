@@ -734,6 +734,38 @@ plt.pause(0.5)
 
 
 
+momentum_true_val = momentum_mev[val_indices_np]
+momentum_mae = np.mean(np.abs(momentum_pred_mev - momentum_true_val))
+print(f"Momentum MAE: {momentum_mae:.1f} MeV")
+
+half = n_val // 2
+calibration_error = momentum_pred_mev[:half] - momentum_true_val[:half]
+calibration_factor = np.std(calibration_error) / momentum_pred_std_mev[:half].mean()
+
+report_true = momentum_true_val[half:]
+report_pred = momentum_pred_mev[half:]
+report_std_raw = momentum_pred_std_mev[half:]
+report_std_calibrated = report_std_raw * calibration_factor
+
+coverage_raw = np.mean(np.abs(report_pred - report_true) < report_std_raw)
+coverage_calibrated = np.mean(np.abs(report_pred - report_true) < report_std_calibrated)
+
+print(f"Raw NLL-trained calibration: {coverage_raw:.3f} within 1 std (target ~0.68)")
+print(f"After a {calibration_factor:.2f}x post-hoc correction: {coverage_calibrated:.3f}")
+
+plt.figure(figsize=(4.5, 4.5))
+sample2 = np.random.default_rng(0).choice(len(report_true), min(200, len(report_true)), replace=False)
+plt.errorbar(report_true[sample2], report_pred[sample2], yerr=report_std_calibrated[sample2],
+             fmt="o", markersize=3, alpha=0.5, elinewidth=0.7)
+lims = [momentum_true_val.min(), momentum_true_val.max()]
+plt.plot(lims, lims, "r--")
+plt.xlabel("true momentum [MeV]"); plt.ylabel("predicted momentum [MeV]")
+plt.title("Momentum with calibrated error bars")
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/momentum_with_calibrated_uncertainty.png")
+plt.pause(0.5)
+
+
 
 
 
