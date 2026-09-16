@@ -717,6 +717,20 @@ plt.show(block = False)
 plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/track_finding_theta_result.png")
 plt.pause(0.5)
 
+true_theta_mrad = np.sqrt(true_theta_squared_val) * 1000
+measured_theta_mrad = np.sqrt(measured_theta_squared) * 1000
+
+plt.figure(figsize=(6, 4))
+bins = np.linspace(0, max(true_theta_mrad.max(), measured_theta_mrad.max()), 40)
+plt.hist(measured_theta_mrad, bins=bins, alpha=0.5, color="blue", label="measured (GNN hit selection)")
+plt.hist(true_theta_mrad, bins=bins, alpha=0.5, color="gold", label="true (ground truth)")
+plt.xlabel("scattering angle [mrad]"); plt.ylabel("count")
+plt.title("Measured vs. true scattering angle distribution")
+plt.legend()
+plt.show(block = False)
+plt.savefig("/Users/binishbatool/PycharmProjects/pythonProject/gnn_track_finding/measured_scattering_angles.png")
+plt.pause(0.5)
+
 
 
 
